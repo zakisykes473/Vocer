@@ -1,95 +1,81 @@
 import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
-from selenium.common.exceptions import NoSuchElementException
-import time
-import random
-import requests
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+import random, time, requests
 
-# === Telegram kamu ===
-TELEGRAM_BOT_TOKEN = "7654295973:AAGVfUSyKqgmrzqmUn3CwgF8Qq3yFxAg-bE"
+# === KONFIGURASI ===
+TELEGRAM_TOKEN = "7654295973:AAGVfUSyKqgmrzqmUn3CwgF8Qq3yFxAg-bE"
 TELEGRAM_CHAT_ID = "6312801995"
+TARGET_URL = "https://www.joinmarriottbonvoy.com/gojek/s/EN-GB/"
+EMAIL_FILE = "file.txt"
 
-def send_telegram_message(message):
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": message,
-        "parse_mode": "HTML"
-    }
+# Lokasi Chromium untuk Termux (sesuaikan jika beda)
+CHROMIUM_PATH = "/data/data/com.termux/files/usr/bin/chromium"
+
+# === Fungsi kirim notifikasi ke Telegram ===
+def kirim_telegram(pesan):
     try:
-        res = requests.post(url, data=payload)
-        if res.status_code == 200:
-            print("📩 Notifikasi Telegram terkirim.")
-        else:
-            print("⚠️ Gagal kirim Telegram:", res.text)
+        requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+            data={"chat_id": TELEGRAM_CHAT_ID, "text": pesan},
+        )
     except Exception as e:
-        print("❌ Error kirim Telegram:", e)
+        print(f"Gagal kirim ke Telegram: {e}")
 
-def generate_random_name():
-    first_names = ["Andi", "Budi", "Citra", "Dewi", "Eka", "Fajar"]
-    last_names = ["Santoso", "Wijaya", "Saputra", "Lestari", "Halim", "Putra"]
-    return random.choice(first_names), random.choice(last_names)
+# === Generate nama random ===
+def generate_nama():
+    depan = ["Zaki", "Fajar", "Rizal", "Dina", "Putri", "Sari", "Budi", "Rina", "Agus"]
+    belakang = ["Sykes", "Wijaya", "Rahma", "Saputra", "Utami", "Permadi"]
+    return random.choice(depan) + " " + random.choice(belakang)
 
-def wait_until_page_ready(driver, wait_time=5, email=""):
-    attempt = 0
-    while True:
-        attempt += 1
-        try:
-            driver.find_element(By.ID, "firstName")
-            print(f"✅ Halaman siap setelah {attempt} percobaan")
-            return True
-        except NoSuchElementException:
-            print(f"[{attempt}] Halaman belum siap, refresh ulang...")
-            time.sleep(wait_time)
-            driver.refresh()
-            if attempt % 10 == 0:
-                send_telegram_message(
-                    f"⚠️ <b>Masih mencoba klaim voucher</b>\n📧 Email: <code>{email}</code>\n🔁 Sudah {attempt}x refresh, halaman belum siap."
-                )
-
-# Baca daftar email
-with open("file.txt", "r") as f:
-    emails = [line.strip() for line in f if line.strip()]
-
-for email in emails:
+# === Proses 1 email ===
+def proses_email(email):
     print(f"\n=== Mulai proses email: {email} ===")
-    
+    kirim_telegram(f"Mulai klaim voucher untuk: {email}")
+
     options = uc.ChromeOptions()
+    options.binary_location = CHROMIUM_PATH
+    options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--headless=new")  # Hapus jika ingin lihat browser
-    
-    driver = uc.Chrome(options=options)
-    driver.get("https://www.joinmarriottbonvoy.com/gojek/s/EN-GB/")
-
-    # Tunggu sampai halaman bisa diisi (tanpa batas)
-    wait_until_page_ready(driver, email=email)
 
     try:
-        fname, lname = generate_random_name()
-        driver.find_element(By.ID, "firstName").send_keys(fname)
-        driver.find_element(By.ID, "lastName").send_keys(lname)
-        driver.find_element(By.ID, "email").send_keys(email)
+        driver = uc.Chrome(options=options)
+        driver.get(TARGET_URL)
 
-        checkbox = driver.find_element(By.XPATH, '//label[contains(@for,"privacyPolicy")]')
-        driver.execute_script("arguments[0].click();", checkbox)
-        time.sleep(1)
+        # Tunggu form muncul (maks 20 detik)
+        WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.NAME, "firstName")))
 
-        submit = driver.find_element(By.XPATH, '//button[contains(text(),"Join Now")]')
+        # Isi nama dan email
+        driver.find_element(By.NAME, "firstName").send_keys(generate_nama())
+        driver.find_element(By.NAME, "lastName").send_keys("AutoBot")
+        driver.find_element(By.NAME, "email").send_keys(email)
+
+        # Ceklis checkbox
+        checkbox = driver.find_element(By.NAME, "checkBoxForm")
+        if not checkbox.is_selected():
+            checkbox.click()
+
+        # Submit
+        submit = driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
         submit.click()
 
-        time.sleep(3)  # Tunggu submit
+        time.sleep(5)  # Tunggu proses
 
-        send_telegram_message(
-            f"✅ <b>Voucher diklaim</b>\n📧 Email: <code>{email}</code>\n👤 Nama: <code>{fname} {lname}</code>"
-        )
-        print(f"Sukses submit: {email}")
-
+        kirim_telegram(f"Sukses submit: {email}")
+        print(f"✅ Sukses klaim: {email}")
+        driver.quit()
     except Exception as e:
-        print(f"❌ Gagal submit untuk {email}: {e}")
-        send_telegram_message(
-            f"❌ <b>Gagal submit voucher</b>\n📧 Email: <code>{email}</code>\n👤 Nama: <code>{fname} {lname}</code>\n💥 Error: <code>{str(e)}</code>"
-        )
+        kirim_telegram(f"❌ Gagal proses {email}: {str(e)}")
+        print(f"❌ Error dengan {email}: {e}")
+        driver.quit()
+        time.sleep(3)
+        proses_email(email)  # Retry tanpa batas
 
-    driver.quit()
-    time.sleep(5)  # jeda antar email
+# === Main ===
+with open(EMAIL_FILE, "r") as f:
+    daftar_email = [x.strip() for x in f.readlines() if x.strip()]
+
+for email in daftar_email:
+    proses_email(email)
